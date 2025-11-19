@@ -1,0 +1,5 @@
+{
+  "name": "MeloTV Manager",
+  "description": "Sistema de gestão de clientes e produtos para serviços de streaming, com integração IA para geração de mensagens.",
+  "requestFramePermissions": []
+}
