@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { ViewState, User, Customer, PlanType, Product, Panel } from './types';
 import { Button } from './components/Button';
@@ -16,7 +15,6 @@ import {
   MonitorPlay,
   Tv,
   CheckCircle,
-  XCircle,
   AlertCircle
 } from 'lucide-react';
 import { getCustomers, saveCustomer, deleteCustomer, getProducts, getPanels, savePanel, deletePanel } from './services/storageService';
@@ -88,15 +86,14 @@ const LoginScreen = ({ onLogin }: { onLogin: () => void }) => {
 };
 
 // DASHBOARD COMPONENT
-const Dashboard = ({ customers }: { customers: Customer[] }) => {
-  // Calculate stats
+const Dashboard = ({ customers, isLoading }: { customers: Customer[], isLoading: boolean }) => {
+  if (isLoading) return <div className="text-white p-6">Carregando dados...</div>;
+
   const totalRevenue = customers.reduce((acc, curr) => acc + curr.plan, 0);
   const pendingRevenue = customers.filter(c => c.paymentStatus === 'pending').reduce((acc, curr) => acc + curr.plan, 0);
   const activeCustomers = customers.length;
   const pendingCount = customers.filter(c => c.paymentStatus === 'pending').length;
   
-  // Chart Data: Customers per Panel
-  // Aggregate counts by panel name string
   const panelCounts: Record<string, number> = {};
   customers.forEach(c => {
     panelCounts[c.panel] = (panelCounts[c.panel] || 0) + 1;
@@ -107,7 +104,6 @@ const Dashboard = ({ customers }: { customers: Customer[] }) => {
     count
   }));
 
-  // Chart Data: Payment Status
   const statusData = [
     { name: 'Pago', value: customers.filter(c => c.paymentStatus === 'paid').length, color: '#22c55e' },
     { name: 'Pendente', value: customers.filter(c => c.paymentStatus === 'pending').length, color: '#eab308' }
@@ -223,23 +219,33 @@ export default function App() {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [panels, setPanels] = useState<Panel[]>([]);
+  const [isLoadingData, setIsLoadingData] = useState(false);
   
-  // Form State
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
   
-  // Panel Form State
   const [newPanelName, setNewPanelName] = useState('');
-
-  // AI Modal State
+  
   const [aiModalOpen, setAiModalOpen] = useState(false);
   const [generatedMessage, setGeneratedMessage] = useState('');
   const [aiLoading, setAiLoading] = useState(false);
 
-  const refreshData = () => {
-    setCustomers(getCustomers());
-    setProducts(getProducts());
-    setPanels(getPanels());
+  const refreshData = async () => {
+    setIsLoadingData(true);
+    try {
+      const [cData, pData, panData] = await Promise.all([
+        getCustomers(),
+        getProducts(),
+        getPanels()
+      ]);
+      setCustomers(cData);
+      setProducts(pData);
+      setPanels(panData);
+    } catch (error) {
+      console.error("Failed to refresh data", error);
+    } finally {
+      setIsLoadingData(false);
+    }
   };
 
   useEffect(() => {
@@ -250,26 +256,27 @@ export default function App() {
 
   const handleLogout = () => {
     setUser({ username: '', isAuthenticated: false });
+    setCustomers([]); // Clear data on logout
   };
 
-  const handleDelete = (id: string) => {
+  const handleDelete = async (id: string) => {
     if (confirm('Tem certeza que deseja excluir este cliente?')) {
-      deleteCustomer(id);
+      await deleteCustomer(id);
       refreshData();
     }
   };
 
-  const handleTogglePayment = (customer: Customer) => {
+  const handleTogglePayment = async (customer: Customer) => {
     const newStatus = customer.paymentStatus === 'paid' ? 'pending' : 'paid';
-    saveCustomer({ ...customer, paymentStatus: newStatus });
+    await saveCustomer({ ...customer, paymentStatus: newStatus });
     refreshData();
   };
 
-  const handleAddPanel = (e: React.FormEvent) => {
+  const handleAddPanel = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newPanelName.trim()) return;
     
-    savePanel({
+    await savePanel({
       id: crypto.randomUUID(),
       name: newPanelName.trim()
     });
@@ -277,9 +284,9 @@ export default function App() {
     refreshData();
   };
 
-  const handleDeletePanel = (id: string) => {
+  const handleDeletePanel = async (id: string) => {
     if(confirm('Excluir este painel?')) {
-      deletePanel(id);
+      await deletePanel(id);
       refreshData();
     }
   };
@@ -289,7 +296,6 @@ export default function App() {
     setAiLoading(true);
     setGeneratedMessage('Pensando...');
     
-    // Slightly different prompt context if pending
     const context = customer.paymentStatus === 'pending' 
       ? `O cliente está com pagamento PENDENTE. Seja educado mas lembre do vencimento.`
       : `O cliente está em dia. Agradeça a preferência.`;
@@ -299,13 +305,18 @@ export default function App() {
     setAiLoading(false);
   };
 
+  const handleSaveCustomer = async (customer: Customer) => {
+    await saveCustomer(customer);
+    refreshData();
+    setIsFormOpen(false);
+  }
+
   if (!user.isAuthenticated) {
     return <LoginScreen onLogin={() => setUser({ username: 'admin', isAuthenticated: true })} />;
   }
 
   return (
     <div className="flex min-h-screen bg-slate-950 text-slate-50 font-sans">
-      {/* Sidebar */}
       <aside className="w-64 bg-slate-900 border-r border-slate-800 hidden md:flex flex-col">
         <div className="p-6 flex items-center gap-3 border-b border-slate-800">
           <PlayCircle className="text-purple-500 w-8 h-8" />
@@ -351,7 +362,6 @@ export default function App() {
         </div>
       </aside>
 
-      {/* Main Content */}
       <main className="flex-1 overflow-y-auto">
         <header className="bg-slate-900/50 backdrop-blur-md border-b border-slate-800 sticky top-0 z-20 p-4 md:hidden flex justify-between items-center">
            <div className="flex items-center gap-2">
@@ -362,7 +372,7 @@ export default function App() {
         </header>
 
         <div className="p-6 max-w-7xl mx-auto">
-          {currentView === 'DASHBOARD' && <Dashboard customers={customers} />}
+          {currentView === 'DASHBOARD' && <Dashboard customers={customers} isLoading={isLoadingData} />}
 
           {currentView === 'PRODUCTS' && (
              <div className="space-y-6 animate-in fade-in duration-500">
@@ -380,6 +390,8 @@ export default function App() {
                       <Button variant="secondary" className="w-full text-sm">Editar Detalhes</Button>
                     </div>
                   ))}
+                  {products.length === 0 && !isLoadingData && <p className="text-slate-500">Nenhum produto encontrado.</p>}
+                  {isLoadingData && <p className="text-slate-500">Carregando...</p>}
                 </div>
              </div>
           )}
@@ -418,7 +430,8 @@ export default function App() {
                       </button>
                     </div>
                   ))}
-                  {panels.length === 0 && <p className="text-slate-500">Nenhum painel cadastrado.</p>}
+                  {isLoadingData && <p className="text-slate-500">Atualizando lista...</p>}
+                  {!isLoadingData && panels.length === 0 && <p className="text-slate-500">Nenhum painel cadastrado.</p>}
                 </div>
               </div>
             </div>
@@ -449,7 +462,9 @@ export default function App() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-800">
-                      {customers.map(c => (
+                      {isLoadingData ? (
+                        <tr><td colSpan={6} className="px-6 py-12 text-center text-slate-500">Carregando dados do banco...</td></tr>
+                      ) : customers.map(c => (
                         <tr key={c.id} className="hover:bg-slate-800/50 transition-colors">
                           <td className="px-6 py-4">
                              <button 
@@ -505,7 +520,7 @@ export default function App() {
                           </td>
                         </tr>
                       ))}
-                      {customers.length === 0 && (
+                      {!isLoadingData && customers.length === 0 && (
                         <tr>
                           <td colSpan={6} className="px-6 py-12 text-center text-slate-500">
                             Nenhum cliente cadastrado.
@@ -536,11 +551,7 @@ export default function App() {
               initialData={editingCustomer} 
               panels={panels}
               onClose={() => setIsFormOpen(false)}
-              onSave={(c) => {
-                saveCustomer(c);
-                refreshData();
-                setIsFormOpen(false);
-              }}
+              onSave={handleSaveCustomer}
             />
           </div>
         </div>
@@ -582,7 +593,6 @@ export default function App() {
   );
 }
 
-// SEPARATE FORM COMPONENT
 const CustomerForm = ({ 
   initialData, 
   panels,
@@ -607,7 +617,6 @@ const CustomerForm = ({
     }
   );
 
-  // Ensure panel defaults to first available if creating new and panel is empty
   useEffect(() => {
     if (!initialData && !formData.panel && panels.length > 0) {
       setFormData(prev => ({ ...prev, panel: panels[0].name }));
