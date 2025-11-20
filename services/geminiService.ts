@@ -1,13 +1,28 @@
 import { GoogleGenAI } from "@google/genai";
 
-const apiKey = process.env.API_KEY || '';
-// Note: In a real production app, handle missing API keys gracefully. 
-// We assume the environment provides it for this demo.
+// Safe access to process.env to prevent "process is not defined" crashes in browser
+const getApiKey = () => {
+  try {
+    // @ts-ignore - process.env is injected by Vite config
+    return process.env.API_KEY || '';
+  } catch (e) {
+    console.warn("Environment variable access failed");
+    return '';
+  }
+};
 
-const ai = new GoogleGenAI({ apiKey });
+const apiKey = getApiKey();
+let ai: GoogleGenAI | null = null;
+
+if (apiKey) {
+  ai = new GoogleGenAI({ apiKey });
+}
 
 export const generateMarketingMessage = async (customerName: string, panel: string, price: number): Promise<string> => {
-  if (!apiKey) return "Erro: API Key não configurada.";
+  if (!ai || !apiKey) {
+    console.warn("AI Service: Missing API Key");
+    return "Erro: Chave de API não configurada no Vercel (Environment Variables).";
+  }
 
   try {
     const prompt = `
@@ -27,6 +42,6 @@ export const generateMarketingMessage = async (customerName: string, panel: stri
     return response.text || "Não foi possível gerar a mensagem.";
   } catch (error) {
     console.error("Error generating message:", error);
-    return "Erro ao conectar com a IA da MeloTV.";
+    return "Erro ao conectar com a IA. Verifique a API Key.";
   }
 };
