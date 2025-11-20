@@ -1,5 +1,6 @@
+
 import React, { useState, useEffect } from 'react';
-import { ViewState, User, Customer, PanelType, PlanType, Product } from './types';
+import { ViewState, User, Customer, PlanType, Product, Panel } from './types';
 import { Button } from './components/Button';
 import { 
   LayoutDashboard, 
@@ -12,14 +13,15 @@ import {
   Search,
   MessageSquare,
   Wallet,
-  MonitorPlay
+  MonitorPlay,
+  Tv,
+  CheckCircle,
+  XCircle,
+  AlertCircle
 } from 'lucide-react';
-import { getCustomers, saveCustomer, deleteCustomer, getProducts } from './services/storageService';
+import { getCustomers, saveCustomer, deleteCustomer, getProducts, getPanels, savePanel, deletePanel } from './services/storageService';
 import { generateMarketingMessage } from './services/geminiService';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
-
-// --- Components defined inline to maintain single-file structure request where possible, 
-// but structured logically. Complex components separated conceptually ---
 
 // LOGIN COMPONENT
 const LoginScreen = ({ onLogin }: { onLogin: () => void }) => {
@@ -29,7 +31,6 @@ const LoginScreen = ({ onLogin }: { onLogin: () => void }) => {
 
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
-    // Simple mock auth
     if (username === 'admin' && password === 'admin') {
       onLogin();
     } else {
@@ -90,29 +91,35 @@ const LoginScreen = ({ onLogin }: { onLogin: () => void }) => {
 const Dashboard = ({ customers }: { customers: Customer[] }) => {
   // Calculate stats
   const totalRevenue = customers.reduce((acc, curr) => acc + curr.plan, 0);
-  const activeCustomers = customers.length; // Assuming all in list are active for demo
+  const pendingRevenue = customers.filter(c => c.paymentStatus === 'pending').reduce((acc, curr) => acc + curr.plan, 0);
+  const activeCustomers = customers.length;
+  const pendingCount = customers.filter(c => c.paymentStatus === 'pending').length;
   
   // Chart Data: Customers per Panel
-  const panelData = Object.values(PanelType).map(panel => ({
-    name: panel,
-    count: customers.filter(c => c.panel === panel).length
-  })).filter(d => d.count > 0);
+  // Aggregate counts by panel name string
+  const panelCounts: Record<string, number> = {};
+  customers.forEach(c => {
+    panelCounts[c.panel] = (panelCounts[c.panel] || 0) + 1;
+  });
+  
+  const panelData = Object.entries(panelCounts).map(([name, count]) => ({
+    name,
+    count
+  }));
 
-  // Chart Data: Plan Distribution
-  const planData = [20, 25, 30].map(price => ({
-    name: `R$ ${price}`,
-    value: customers.filter(c => c.plan === price).length
-  })).filter(d => d.value > 0);
-
-  const COLORS = ['#8b5cf6', '#a855f7', '#d8b4fe', '#6366f1'];
+  // Chart Data: Payment Status
+  const statusData = [
+    { name: 'Pago', value: customers.filter(c => c.paymentStatus === 'paid').length, color: '#22c55e' },
+    { name: 'Pendente', value: customers.filter(c => c.paymentStatus === 'pending').length, color: '#eab308' }
+  ].filter(d => d.value > 0);
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
         <div className="bg-slate-900 p-6 rounded-xl border border-slate-800 shadow-lg">
           <div className="flex justify-between items-start">
             <div>
-              <p className="text-slate-400 text-sm">Faturamento Mensal</p>
+              <p className="text-slate-400 text-sm">Faturamento Total</p>
               <h3 className="text-3xl font-bold text-white mt-2">
                 R$ {totalRevenue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
               </h3>
@@ -122,11 +129,27 @@ const Dashboard = ({ customers }: { customers: Customer[] }) => {
             </div>
           </div>
         </div>
+
+        <div className="bg-slate-900 p-6 rounded-xl border border-slate-800 shadow-lg relative overflow-hidden">
+          <div className="absolute right-0 top-0 w-24 h-24 bg-yellow-500/10 rounded-bl-full -mr-4 -mt-4"></div>
+          <div className="flex justify-between items-start relative z-10">
+            <div>
+              <p className="text-slate-400 text-sm">Pendente (A Receber)</p>
+              <h3 className="text-3xl font-bold text-yellow-400 mt-2">
+                R$ {pendingRevenue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+              </h3>
+              <p className="text-xs text-yellow-500/70 mt-1">{pendingCount} clientes pendentes</p>
+            </div>
+            <div className="p-3 bg-yellow-500/10 rounded-lg">
+              <AlertCircle className="text-yellow-500 w-6 h-6" />
+            </div>
+          </div>
+        </div>
         
         <div className="bg-slate-900 p-6 rounded-xl border border-slate-800 shadow-lg">
           <div className="flex justify-between items-start">
             <div>
-              <p className="text-slate-400 text-sm">Clientes Ativos</p>
+              <p className="text-slate-400 text-sm">Total Clientes</p>
               <h3 className="text-3xl font-bold text-white mt-2">{activeCustomers}</h3>
             </div>
             <div className="p-3 bg-blue-500/10 rounded-lg">
@@ -168,21 +191,20 @@ const Dashboard = ({ customers }: { customers: Customer[] }) => {
         </div>
 
         <div className="bg-slate-900 p-6 rounded-xl border border-slate-800 h-[400px]">
-          <h3 className="text-lg font-semibold text-white mb-4">Distribuição de Planos</h3>
+          <h3 className="text-lg font-semibold text-white mb-4">Status de Pagamento</h3>
           <ResponsiveContainer width="100%" height="90%">
             <PieChart>
               <Pie
-                data={planData}
+                data={statusData}
                 cx="50%"
                 cy="50%"
                 innerRadius={60}
                 outerRadius={100}
-                fill="#8884d8"
                 paddingAngle={5}
                 dataKey="value"
               >
-                {planData.map((entry, index) => (
-                  <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                {statusData.map((entry, index) => (
+                  <Cell key={`cell-${index}`} fill={entry.color} />
                 ))}
               </Pie>
               <Tooltip contentStyle={{ backgroundColor: '#1e293b', border: 'none', borderRadius: '8px', color: '#fff' }} />
@@ -200,20 +222,29 @@ export default function App() {
   const [currentView, setCurrentView] = useState<ViewState>('DASHBOARD');
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
+  const [panels, setPanels] = useState<Panel[]>([]);
   
   // Form State
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
   
+  // Panel Form State
+  const [newPanelName, setNewPanelName] = useState('');
+
   // AI Modal State
   const [aiModalOpen, setAiModalOpen] = useState(false);
   const [generatedMessage, setGeneratedMessage] = useState('');
   const [aiLoading, setAiLoading] = useState(false);
 
+  const refreshData = () => {
+    setCustomers(getCustomers());
+    setProducts(getProducts());
+    setPanels(getPanels());
+  };
+
   useEffect(() => {
     if (user.isAuthenticated) {
-      setCustomers(getCustomers());
-      setProducts(getProducts());
+      refreshData();
     }
   }, [user.isAuthenticated]);
 
@@ -224,7 +255,32 @@ export default function App() {
   const handleDelete = (id: string) => {
     if (confirm('Tem certeza que deseja excluir este cliente?')) {
       deleteCustomer(id);
-      setCustomers(getCustomers());
+      refreshData();
+    }
+  };
+
+  const handleTogglePayment = (customer: Customer) => {
+    const newStatus = customer.paymentStatus === 'paid' ? 'pending' : 'paid';
+    saveCustomer({ ...customer, paymentStatus: newStatus });
+    refreshData();
+  };
+
+  const handleAddPanel = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newPanelName.trim()) return;
+    
+    savePanel({
+      id: crypto.randomUUID(),
+      name: newPanelName.trim()
+    });
+    setNewPanelName('');
+    refreshData();
+  };
+
+  const handleDeletePanel = (id: string) => {
+    if(confirm('Excluir este painel?')) {
+      deletePanel(id);
+      refreshData();
     }
   };
 
@@ -233,6 +289,11 @@ export default function App() {
     setAiLoading(true);
     setGeneratedMessage('Pensando...');
     
+    // Slightly different prompt context if pending
+    const context = customer.paymentStatus === 'pending' 
+      ? `O cliente está com pagamento PENDENTE. Seja educado mas lembre do vencimento.`
+      : `O cliente está em dia. Agradeça a preferência.`;
+
     const msg = await generateMarketingMessage(customer.name, customer.panel, customer.plan);
     setGeneratedMessage(msg);
     setAiLoading(false);
@@ -267,11 +328,18 @@ export default function App() {
             Clientes
           </button>
           <button 
+            onClick={() => setCurrentView('PANELS')}
+            className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${currentView === 'PANELS' ? 'bg-purple-600 text-white shadow-lg shadow-purple-900/20' : 'text-slate-400 hover:bg-slate-800 hover:text-white'}`}
+          >
+            <Tv className="w-5 h-5" />
+            Painéis
+          </button>
+          <button 
             onClick={() => setCurrentView('PRODUCTS')}
             className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${currentView === 'PRODUCTS' ? 'bg-purple-600 text-white shadow-lg shadow-purple-900/20' : 'text-slate-400 hover:bg-slate-800 hover:text-white'}`}
           >
             <Package className="w-5 h-5" />
-            Produtos/Planos
+            Planos
           </button>
         </nav>
 
@@ -316,6 +384,46 @@ export default function App() {
              </div>
           )}
 
+          {currentView === 'PANELS' && (
+            <div className="space-y-6 animate-in fade-in duration-500 max-w-4xl">
+              <h2 className="text-2xl font-bold text-white">Gerenciar Painéis</h2>
+              
+              <div className="bg-slate-900 rounded-xl border border-slate-800 p-6">
+                <form onSubmit={handleAddPanel} className="flex gap-4 mb-8 border-b border-slate-800 pb-8">
+                  <input 
+                    type="text"
+                    placeholder="Nome do Novo Painel"
+                    className="flex-1 bg-slate-950 border border-slate-700 rounded-lg px-4 py-2 text-white focus:ring-2 focus:ring-purple-500 outline-none"
+                    value={newPanelName}
+                    onChange={(e) => setNewPanelName(e.target.value)}
+                  />
+                  <Button type="submit">
+                    <Plus className="w-5 h-5" />
+                    Adicionar
+                  </Button>
+                </form>
+
+                <div className="grid gap-4 md:grid-cols-2">
+                  {panels.map(panel => (
+                    <div key={panel.id} className="flex justify-between items-center p-4 bg-slate-950/50 rounded-lg border border-slate-800">
+                      <div className="flex items-center gap-3">
+                        <div className="w-2 h-2 rounded-full bg-purple-500"></div>
+                        <span className="font-medium">{panel.name}</span>
+                      </div>
+                      <button 
+                        onClick={() => handleDeletePanel(panel.id)}
+                        className="p-2 text-slate-500 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  ))}
+                  {panels.length === 0 && <p className="text-slate-500">Nenhum painel cadastrado.</p>}
+                </div>
+              </div>
+            </div>
+          )}
+
           {currentView === 'CUSTOMERS' && (
             <div className="space-y-6 animate-in fade-in duration-500">
               <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
@@ -332,6 +440,7 @@ export default function App() {
                   <table className="w-full text-left text-sm">
                     <thead className="bg-slate-950 text-slate-400 uppercase font-medium">
                       <tr>
+                        <th className="px-6 py-4">Status</th>
                         <th className="px-6 py-4">Cliente</th>
                         <th className="px-6 py-4">Painel / App</th>
                         <th className="px-6 py-4">Plano</th>
@@ -343,6 +452,19 @@ export default function App() {
                       {customers.map(c => (
                         <tr key={c.id} className="hover:bg-slate-800/50 transition-colors">
                           <td className="px-6 py-4">
+                             <button 
+                               onClick={() => handleTogglePayment(c)}
+                               className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium border transition-all ${
+                                 c.paymentStatus === 'paid' 
+                                   ? 'bg-green-500/10 text-green-400 border-green-500/20 hover:bg-green-500/20' 
+                                   : 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20 hover:bg-yellow-500/20'
+                               }`}
+                             >
+                               {c.paymentStatus === 'paid' ? <CheckCircle className="w-3 h-3" /> : <AlertCircle className="w-3 h-3" />}
+                               {c.paymentStatus === 'paid' ? 'Pago' : 'Pendente'}
+                             </button>
+                          </td>
+                          <td className="px-6 py-4">
                             <div className="font-medium text-white">{c.name}</div>
                             <div className="text-slate-500 text-xs">{c.phone}</div>
                           </td>
@@ -353,7 +475,7 @@ export default function App() {
                             </div>
                           </td>
                           <td className="px-6 py-4">
-                            <span className="font-mono text-green-400">R$ {c.plan.toFixed(2)}</span>
+                            <span className="font-mono text-slate-300">R$ {c.plan.toFixed(2)}</span>
                           </td>
                           <td className="px-6 py-4 text-slate-400">
                             {new Date(c.registrationDate).toLocaleDateString('pt-BR')}
@@ -363,7 +485,7 @@ export default function App() {
                               <button 
                                 onClick={() => handleGenerateAiMessage(c)}
                                 className="p-2 text-purple-400 hover:bg-purple-500/10 rounded-lg transition-colors"
-                                title="Gerar Cobrança IA"
+                                title="Gerar Mensagem IA"
                               >
                                 <MessageSquare className="w-4 h-4" />
                               </button>
@@ -385,7 +507,7 @@ export default function App() {
                       ))}
                       {customers.length === 0 && (
                         <tr>
-                          <td colSpan={5} className="px-6 py-12 text-center text-slate-500">
+                          <td colSpan={6} className="px-6 py-12 text-center text-slate-500">
                             Nenhum cliente cadastrado.
                           </td>
                         </tr>
@@ -412,10 +534,11 @@ export default function App() {
             
             <CustomerForm 
               initialData={editingCustomer} 
+              panels={panels}
               onClose={() => setIsFormOpen(false)}
               onSave={(c) => {
                 saveCustomer(c);
-                setCustomers(getCustomers());
+                refreshData();
                 setIsFormOpen(false);
               }}
             />
@@ -459,19 +582,37 @@ export default function App() {
   );
 }
 
-// SEPARATE FORM COMPONENT FOR CLEANLINESS
-const CustomerForm = ({ initialData, onClose, onSave }: { initialData: Customer | null, onClose: () => void, onSave: (c: Customer) => void }) => {
+// SEPARATE FORM COMPONENT
+const CustomerForm = ({ 
+  initialData, 
+  panels,
+  onClose, 
+  onSave 
+}: { 
+  initialData: Customer | null, 
+  panels: Panel[],
+  onClose: () => void, 
+  onSave: (c: Customer) => void 
+}) => {
   const [formData, setFormData] = useState<Partial<Customer>>(
     initialData || {
       name: '',
       phone: '',
-      panel: PanelType.P2CINE,
+      panel: panels.length > 0 ? panels[0].name : '',
       appUsed: '',
       plan: PlanType.BASIC,
+      paymentStatus: 'paid',
       registrationDate: new Date().toISOString().split('T')[0],
       active: true
     }
   );
+
+  // Ensure panel defaults to first available if creating new and panel is empty
+  useEffect(() => {
+    if (!initialData && !formData.panel && panels.length > 0) {
+      setFormData(prev => ({ ...prev, panel: panels[0].name }));
+    }
+  }, [panels, initialData, formData.panel]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -481,9 +622,10 @@ const CustomerForm = ({ initialData, onClose, onSave }: { initialData: Customer 
       id: initialData?.id || crypto.randomUUID(),
       name: formData.name!,
       phone: formData.phone!,
-      panel: formData.panel as PanelType,
+      panel: formData.panel || (panels.length > 0 ? panels[0].name : 'Outro'),
       appUsed: formData.appUsed || 'N/A',
       plan: Number(formData.plan),
+      paymentStatus: formData.paymentStatus || 'pending',
       registrationDate: formData.registrationDate!,
       active: formData.active ?? true
     };
@@ -518,11 +660,12 @@ const CustomerForm = ({ initialData, onClose, onSave }: { initialData: Customer 
           <select 
             className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white focus:ring-2 focus:ring-purple-500 outline-none"
             value={formData.panel}
-            onChange={e => setFormData({...formData, panel: e.target.value as PanelType})}
+            onChange={e => setFormData({...formData, panel: e.target.value})}
           >
-            {Object.values(PanelType).map(p => (
-              <option key={p} value={p}>{p}</option>
+            {panels.map(p => (
+              <option key={p.id} value={p.name}>{p.name}</option>
             ))}
+            {panels.length === 0 && <option value="">Nenhum painel cadastrado</option>}
           </select>
         </div>
 
@@ -560,6 +703,34 @@ const CustomerForm = ({ initialData, onClose, onSave }: { initialData: Customer 
             onChange={e => setFormData({...formData, registrationDate: e.target.value})}
           />
         </div>
+      </div>
+
+      <div>
+         <label className="block text-sm font-medium text-slate-400 mb-2">Status Financeiro</label>
+         <div className="flex gap-4">
+           <label className={`flex-1 flex items-center justify-center gap-2 p-3 rounded-lg border cursor-pointer transition-all ${formData.paymentStatus === 'paid' ? 'bg-green-500/20 border-green-500 text-green-400' : 'bg-slate-950 border-slate-700 text-slate-400'}`}>
+             <input 
+               type="radio" 
+               name="status" 
+               className="hidden"
+               checked={formData.paymentStatus === 'paid'}
+               onChange={() => setFormData({...formData, paymentStatus: 'paid'})}
+             />
+             <CheckCircle className="w-4 h-4" />
+             <span>Pago</span>
+           </label>
+           <label className={`flex-1 flex items-center justify-center gap-2 p-3 rounded-lg border cursor-pointer transition-all ${formData.paymentStatus === 'pending' ? 'bg-yellow-500/20 border-yellow-500 text-yellow-400' : 'bg-slate-950 border-slate-700 text-slate-400'}`}>
+             <input 
+               type="radio" 
+               name="status" 
+               className="hidden"
+               checked={formData.paymentStatus === 'pending'}
+               onChange={() => setFormData({...formData, paymentStatus: 'pending'})}
+             />
+             <AlertCircle className="w-4 h-4" />
+             <span>Pendente</span>
+           </label>
+         </div>
       </div>
 
       <div className="pt-4 flex gap-3 justify-end">
